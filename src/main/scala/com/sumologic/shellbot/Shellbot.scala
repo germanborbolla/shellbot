@@ -18,7 +18,7 @@
  */
 package com.sumologic.shellbot
 
-import java.io.StringWriter
+import java.io.{ByteArrayOutputStream, StringWriter}
 
 import akka.actor.Props
 import com.sumologic.shellbase.ShellBase
@@ -28,6 +28,7 @@ import org.apache.commons.io.output.WriterOutputStream
 
 import scala.util.matching.Regex
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.io.Source
 
 /**
   * Created by panda on 2/20/17.
@@ -51,17 +52,19 @@ class Shellbot(shellbase: ShellBase) extends BotPlugin {
       message.respondInFuture { msg =>
         try {
           log.debug(s"Executing: $command")
-          val console = new StringWriter()
-          val output = new WriterOutputStream(console)
-          Console.withOut(output) { Console.withErr(output) {
-            if (shellbase.runCommand(command)) {
-              output.close()
-              msg.response(s"[${shellbase.name}] Command: $command finished successfully.\n${console.getBuffer}")
-            } else {
-              output.close()
-              msg.response(s"[${shellbase.name}] Command: $command failed.\n${console.getBuffer}")
-            }
+          val output = new ByteArrayOutputStream()
+          val successful = Console.withOut(output) { Console.withErr(output) {
+            shellbase.runCommand(command)
           }}
+          Source.fromBytes(output.toByteArray).getLines().foreach { line =>
+            msg.say(line)
+          }
+          if (successful) {
+            msg.response(s"Command `$command` in `${shellbase.name}` finished successfully.")
+          } else {
+            msg.response(s"Command `$command` in `${shellbase.name}` failed.")
+          }
+
         } catch {
           case e: Exception =>
             log.error(e, s"Error while executing: $command")
