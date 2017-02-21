@@ -19,3 +19,6 @@ project/plugins/project/
 *.iml
 *.ipr
 *.idea
+
+# do not check in config files
+config/sumobot.conf
