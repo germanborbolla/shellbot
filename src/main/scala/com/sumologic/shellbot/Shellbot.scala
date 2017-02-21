@@ -18,16 +18,13 @@
  */
 package com.sumologic.shellbot
 
-import java.io.{ByteArrayOutputStream, StringWriter}
+import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
 
-import akka.actor.Props
+import akka.actor.{Actor, Props}
 import com.sumologic.shellbase.ShellBase
 import com.sumologic.sumobot.core.model.IncomingMessage
 import com.sumologic.sumobot.plugins.BotPlugin
-import org.apache.commons.io.output.WriterOutputStream
 
-import scala.util.matching.Regex
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.io.Source
 
 /**
@@ -38,39 +35,60 @@ object Shellbot {
     Props(classOf[Shellbot], shellBase)
   }
 }
-class Shellbot(shellbase: ShellBase) extends BotPlugin {
+class Shellbot(shellBase: ShellBase) extends BotPlugin {
   override protected def help =
     s"""Execute commands:
       |
-      |execute - Run a single command on ${shellbase.name}
+      |execute - Run a single command on ${shellBase.name}
     """.stripMargin
 
   private val SingleExecute = matchText(s"execute (.*)")
 
+  private val runCommandActor = context.actorOf(Props(classOf[RunCommandActor], shellBase), "runCommand")
+
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
     case message@IncomingMessage(SingleExecute(command), true, _, _) =>
-      message.respondInFuture { msg =>
-        try {
-          log.debug(s"Executing: $command")
-          val output = new ByteArrayOutputStream()
-          val successful = Console.withOut(output) { Console.withErr(output) {
-            shellbase.runCommand(command)
-          }}
-          Source.fromBytes(output.toByteArray).getLines().foreach { line =>
-            msg.say(line)
-          }
-          if (successful) {
-            msg.response(s"Command `$command` in `${shellbase.name}` finished successfully.")
-          } else {
-            msg.response(s"Command `$command` in `${shellbase.name}` failed.")
-          }
+      runCommandActor ! Command(message, command, new Printer(message))
+  }
 
-        } catch {
-          case e: Exception =>
-            log.error(e, s"Error while executing: $command")
-            msg.response(s"Error while executing: $command")
+  override protected def pluginReceive: Receive = {
+    case Completed(message, command, successful) =>
+      if (successful) {
+        message.respond(s"Command `$command` in `${shellBase.name}` finished successfully.")
+      } else {
+        message.respond(s"Command `$command` in `${shellBase.name}` failed.")
+      }
+    case Output(message, bytes) =>
+      Source.fromBytes(bytes).getLines().foreach { line =>
+        if (line.nonEmpty) {
+          message.say(line)
         }
       }
   }
 
+  class Printer(message: IncomingMessage) extends OutputStream {
+    private val bos = new ByteArrayOutputStream()
+    override def write(b: Int): Unit = {
+      bos.write(b)
+    }
+
+    override def flush(): Unit = {
+      self ! Output(message, bos.toByteArray)
+      bos.reset()
+    }
+  }
+}
+case class Output(message: IncomingMessage, bytes: Array[Byte])
+case class Command(message: IncomingMessage, command: String, output: OutputStream)
+case class Completed(message: IncomingMessage, command: String, successful: Boolean)
+class RunCommandActor(shellBase: ShellBase) extends Actor {
+  override def receive: Receive = {
+    case Command(message, command, output) =>
+      val printStream = new PrintStream(output, true)
+      val successful = Console.withOut(printStream) { Console.withErr(printStream) {
+        shellBase.runCommand(command)
+      }}
+      printStream.close()
+      sender() ! Completed(message, command, successful)
+  }
 }
