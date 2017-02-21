@@ -48,7 +48,7 @@ class Shellbot(shellbase: ShellBase) extends BotPlugin {
   private val SingleExecute = matchText(s"execute (.*)")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(SingleExecute(command), _, _, _) =>
+    case message@IncomingMessage(SingleExecute(command), true, _, _) =>
       message.respondInFuture { msg =>
         try {
           log.debug(s"Executing: $command")
