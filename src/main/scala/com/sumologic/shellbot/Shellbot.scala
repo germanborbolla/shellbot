@@ -32,6 +32,7 @@ class Shellbot(shellbase: ShellBase) extends BotPlugin {
     case message@IncomingMessage(SingleExecute(command), _, _, _) =>
       message.respondInFuture { msg =>
         try {
+          log.debug(s"Executing: $command")
           val console = new StringWriter()
           val output = new WriterOutputStream(console)
           Console.withOut(output) { Console.withErr(output) {
