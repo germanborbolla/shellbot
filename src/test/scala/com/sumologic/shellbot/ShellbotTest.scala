@@ -26,10 +26,13 @@ import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
 import org.apache.commons.cli.CommandLine
 import org.scalatest.BeforeAndAfterAll
+import org.scalatest.mock.MockitoSugar
+import slack.rtm.RtmState
 
 import scala.concurrent.duration._
-
-class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with BeforeAndAfterAll {
+import org.mockito.Mockito._
+import slack.models.Team
+class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with BeforeAndAfterAll with MockitoSugar {
 
   private val testShell = new ShellBase("test") {
     override def commands: Seq[ShellCommand] = {
@@ -50,36 +53,46 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
   }
   testShell.initializeCommands()
   private val sut = system.actorOf(Shellbot.props(testShell))
-  sut ! InitializePlugin(null, null, null)
+  private val state = mock[RtmState]
+  when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
+  sut ! InitializePlugin(state, null, null)
 
   "Shellbot" when {
     "executing single commands" should {
       "execute the command and send the output" in {
         sut ! instantMessage("execute echo hello world!")
-        checkForMessages(Seq("hello world!",
-          "Command `echo hello world!` in `test` finished successfully."))
+        checkForMessages(Seq(inThread("Executing: `echo hello world!` in `test`"),
+          inThread("hello world!"),
+          inThread("Command succeeded"),
+          broadcast("Command `echo hello world!` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/pnow.")))
       }
       "send all the lines in the output" in {
         sut ! instantMessage("execute multi")
-        checkForMessages(Seq("hello",
-          "world!",
-          "Command `multi` in `test` finished successfully."))
+        checkForMessages(Seq(inThread("Executing: `multi` in `test`"),
+          inThread("hello"),
+          inThread("world!"),
+          inThread("Command succeeded"),
+          broadcast("Command `multi` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/pnow.")))
       }
       "send the output when a command doesn't exist" in {
         sut ! instantMessage("execute badcommand")
-        checkForMessages(Seq("test: command badcommand not found",
-          "Command `badcommand` in `test` failed."))
+        checkForMessages(Seq(inThread("Executing: `badcommand` in `test`"),
+          inThread("test: command badcommand not found"),
+          inThread("Command failed"),
+          broadcast("Command `badcommand` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/pnow.")))
       }
       "send stuff in err as well" in {
         sut ! instantMessage("execute error")
-        checkForMessages(Seq("this is an error",
-          "Command `error` in `test` failed."))
+        checkForMessages(Seq(inThread("Executing: `error` in `test`"),
+          inThread("this is an error"),
+          inThread("Command failed"),
+          broadcast("Command `error` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/pnow.")))
       }
     }
   }
 
-  private def checkForMessages(expectedMessages: Seq[String], timeout: FiniteDuration = 5.seconds): Unit = {
-    val messages = outgoingMessageProbe.receiveN(expectedMessages.size, timeout).map(_.asInstanceOf[OutgoingMessage]).map(_.text)
+  private def checkForMessages(expectedMessages: Seq[MessageAndThread], timeout: FiniteDuration = 5.seconds): Unit = {
+    val messages = outgoingMessageProbe.receiveN(expectedMessages.size, timeout).map(_.asInstanceOf[OutgoingMessage]).map(x => MessageAndThread(x.text, x.thread))
     messages should be(expectedMessages)
   }
 
@@ -87,4 +100,12 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     TestKit.shutdownActorSystem(system)
   }
 
+  private def inThread(message: String, thread: String = "now"): MessageAndThread = {
+    MessageAndThread(message, Some(thread))
+  }
+
+  private def broadcast(message: String): MessageAndThread = {
+    MessageAndThread(message, None)
+  }
+  case class MessageAndThread(message: String, thread: Option[String] = None)
 }

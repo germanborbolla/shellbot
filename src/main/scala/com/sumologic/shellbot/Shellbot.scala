@@ -22,7 +22,7 @@ import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
 
 import akka.actor.{Actor, Props}
 import com.sumologic.shellbase.ShellBase
-import com.sumologic.sumobot.core.model.IncomingMessage
+import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 
 import scala.io.Source
@@ -47,23 +47,35 @@ class Shellbot(shellBase: ShellBase) extends BotPlugin {
   private val runCommandActor = context.actorOf(Props(classOf[RunCommandActor], shellBase), "runCommand")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(SingleExecute(command), true, _, _, _, _) =>
-      runCommandActor ! Command(message, command, new Printer(message))
+    case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
+      message.respond(s"Executing: `$command` in `${shellBase.name}`", Some(parentId))
+      val messageInThread = message.copy(thread_ts = Some(parentId))
+      runCommandActor ! Command(messageInThread, command, new Printer(messageInThread))
   }
 
   override protected def pluginReceive: Receive = {
     case Completed(message, command, successful) =>
       if (successful) {
-        message.respond(s"Command `$command` in `${shellBase.name}` finished successfully.")
+        message.say("Command succeeded", message.thread_ts)
+        message.respond(s"Command `$command` in `${shellBase.name}` finished successfully, full output available on the thread ${urlForThread(message)}.")
       } else {
-        message.respond(s"Command `$command` in `${shellBase.name}` failed.")
+        message.say("Command failed", message.thread_ts)
+        message.respond(s"Command `$command` in `${shellBase.name}` failed, full output available on the thread ${urlForThread(message)}.")
       }
     case Output(message, bytes) =>
       Source.fromBytes(bytes).getLines().foreach { line =>
         if (line.nonEmpty) {
-          message.say(line)
+          message.say(line, message.thread_ts)
         }
       }
+  }
+
+  private def urlForThread(message: IncomingMessage): String = {
+    val id = message.channel match {
+      case x: InstantMessageChannel => x.id
+      case x => x.name
+    }
+    s"https://${state.team.domain}.slack.com/conversation/$id/p${message.thread_ts.get.replace(".","")}"
   }
 
   class Printer(message: IncomingMessage) extends OutputStream {
