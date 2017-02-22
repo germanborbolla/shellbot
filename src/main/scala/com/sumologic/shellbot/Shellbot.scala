@@ -21,7 +21,7 @@ package com.sumologic.shellbot
 import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
 
 import akka.actor.{Actor, Props}
-import com.sumologic.shellbase.ShellBase
+import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 
@@ -31,24 +31,30 @@ import scala.io.Source
   * Created by panda on 2/20/17.
   */
 object Shellbot {
-  def props(shellBase: ShellBase): Props = {
-    Props(classOf[Shellbot], shellBase)
+  def props(name: String, commands: Seq[ShellCommand]): Props = {
+    Props(classOf[Shellbot], name, commands)
+  }
+
+  def runCommand(commandSet: ShellCommandSet): Props = {
+    Props(classOf[RunCommandActor], commandSet)
   }
 }
-class Shellbot(shellBase: ShellBase) extends BotPlugin {
+class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
   override protected def help =
     s"""Execute commands:
       |
-      |execute - Run a single command on ${shellBase.name}
+      |execute - Run a single command on $name
     """.stripMargin
 
   private val SingleExecute = matchText(s"execute (.*)")
 
-  private val runCommandActor = context.actorOf(Props(classOf[RunCommandActor], shellBase), "runCommand")
+  private val commandSet = new ShellCommandSet(name, "")
+  commandSet.commands ++= commands
+  private val runCommandActor = context.actorOf(Shellbot.runCommand(commandSet), "runCommand")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
-      message.respond(s"Executing: `$command` in `${shellBase.name}`", Some(parentId))
+    case message@IncomingMessage(SingleExecute(command), true, _, sentByUser, parentId, None) =>
+      message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
       runCommandActor ! Command(messageInThread, command, new Printer(messageInThread))
   }
@@ -57,10 +63,10 @@ class Shellbot(shellBase: ShellBase) extends BotPlugin {
     case Completed(message, command, successful) =>
       if (successful) {
         message.say("Command succeeded", message.thread_ts)
-        message.respond(s"Command `$command` in `${shellBase.name}` finished successfully, full output available on the thread ${urlForThread(message)}.")
+        message.respond(s"Command `$command` in `$name` finished successfully, full output available on the thread ${urlForThread(message)}.")
       } else {
         message.say("Command failed", message.thread_ts)
-        message.respond(s"Command `$command` in `${shellBase.name}` failed, full output available on the thread ${urlForThread(message)}.")
+        message.respond(s"Command `$command` in `$name` failed, full output available on the thread ${urlForThread(message)}.")
       }
     case Output(message, bytes) =>
       Source.fromBytes(bytes).getLines().foreach { line =>
@@ -93,12 +99,12 @@ class Shellbot(shellBase: ShellBase) extends BotPlugin {
 case class Output(message: IncomingMessage, bytes: Array[Byte])
 case class Command(message: IncomingMessage, command: String, output: OutputStream)
 case class Completed(message: IncomingMessage, command: String, successful: Boolean)
-class RunCommandActor(shellBase: ShellBase) extends Actor {
+class RunCommandActor(commandSet: ShellCommandSet) extends Actor {
   override def receive: Receive = {
     case Command(message, command, output) =>
       val printStream = new PrintStream(output, true)
       val successful = Console.withOut(printStream) { Console.withErr(printStream) {
-        shellBase.runCommand(command)
+        commandSet.executeLine(ShellBase.parseLine(command))
       }}
       printStream.close()
       sender() ! Completed(message, command, successful)

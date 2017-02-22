@@ -44,7 +44,7 @@ object ExampleShell extends ShellBase("example") {
     super.init(cmdLine)
     Bootstrap.bootstrap(Props(classOf[InMemoryBrain]), new PluginCollection {
       override def setup(implicit system: ActorSystem) = {
-        addPlugin("shell", Shellbot.props(shellBase = ExampleShell))
+        addPlugin("shell", Shellbot.props(name, commands))
         addPlugin("help", Props(classOf[Help]))
       }
     })
