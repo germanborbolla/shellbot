@@ -22,7 +22,6 @@ import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
 
 import akka.actor.{Actor, ActorLogging, PoisonPill, Props}
 import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
-import com.sumologic.shellbase.{ShellBase, ShellCommandSet}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 import slack.models.User
@@ -32,9 +31,9 @@ import scala.io.Source
 /**
   * Created by panda on 2/20/17.
   */
-object Shellbot {
+object ShellBot {
   def props(name: String, commands: Seq[ShellCommand]): Props = {
-    Props(classOf[Shellbot], name, commands)
+    Props(classOf[ShellBot], name, commands)
   }
 
   def runCommand(commandSet: ShellCommandSet): Props = {
@@ -45,7 +44,7 @@ object Shellbot {
     Props(classOf[ThreadReader], user, thread, ouputStream)
   }
 }
-class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
+class ShellBot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
   override protected def help =
     s"""Execute commands:
       |
@@ -56,14 +55,14 @@ class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
 
   private val commandSet = new ShellCommandSet(name, "")
   commandSet.commands ++= commands
-  private val runCommandActor = context.actorOf(Shellbot.runCommand(commandSet), "runCommand")
+  private val runCommandActor = context.actorOf(ShellBot.runCommand(commandSet), "runCommand")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
     case message@IncomingMessage(SingleExecute(command), true, _, sentByUser, parentId, None) =>
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
       runCommandActor ! Command(messageInThread, command, new Printer(messageInThread))
-      val threadReader = context.actorOf(Shellbot.threadReader(sentByUser, parentId, new ByteArrayOutputStream()), s"threadReader-$parentId")
+      val threadReader = context.actorOf(ShellBot.threadReader(sentByUser, parentId, new ByteArrayOutputStream()), s"threadReader-$parentId")
       context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
   }
 

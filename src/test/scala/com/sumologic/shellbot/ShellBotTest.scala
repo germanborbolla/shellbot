@@ -22,8 +22,8 @@ import java.io.{ByteArrayOutputStream, OutputStream}
 
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
+import com.sumologic.shellbase.ShellCommand
 import com.sumologic.shellbase.commands.EchoCommand
-import com.sumologic.shellbase.{ShellCommand, ShellCommandSet}
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
@@ -35,7 +35,8 @@ import slack.models.Team
 import slack.rtm.RtmState
 
 import scala.concurrent.duration._
-class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with BeforeAndAfterAll with MockitoSugar {
+
+class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with BeforeAndAfterAll with MockitoSugar {
 
   private val testCommands = Seq(
     new ShellCommand("multi", "multi") {
@@ -54,7 +55,7 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     },
     new EchoCommand)
 
-  private val sut = system.actorOf(Shellbot.props("test", testCommands))
+  private val sut = system.actorOf(ShellBot.props("test", testCommands))
   private val state = mock[RtmState]
   when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
   sut ! InitializePlugin(state, null, null)
@@ -99,7 +100,7 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     "ignore messages that are not in thread" in {
       val outputStream = mock[OutputStream]
 
-      val reader = system.actorOf(Shellbot.threadReader(user, threadId, outputStream))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, outputStream))
 
       reader ! channelMessage("some text", user = user)
 
@@ -108,7 +109,7 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     "ignore messages in the thread that are not sent by the creating user" in {
       val outputStream = mock[OutputStream]
 
-      val reader = system.actorOf(Shellbot.threadReader(user, threadId, outputStream))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, outputStream))
 
       reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
 
@@ -117,7 +118,7 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     "write the message to the output stream" in {
       val bos = new ByteArrayOutputStream()
 
-      val reader = system.actorOf(Shellbot.threadReader(user, threadId, bos))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, bos))
 
       reader ! channelMessage("some text", user = user, threadId = Some(threadId))
 
