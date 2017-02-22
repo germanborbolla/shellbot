@@ -47,7 +47,7 @@ class Shellbot(shellBase: ShellBase) extends BotPlugin {
   private val runCommandActor = context.actorOf(Props(classOf[RunCommandActor], shellBase), "runCommand")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(SingleExecute(command), true, _, _) =>
+    case message@IncomingMessage(SingleExecute(command), true, _, _, _, _) =>
       runCommandActor ! Command(message, command, new Printer(message))
   }
 
