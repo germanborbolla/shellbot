@@ -18,6 +18,8 @@
  */
 package com.sumologic.shellbot
 
+import java.io.{ByteArrayOutputStream, OutputStream}
+
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
 import com.sumologic.shellbase.commands.EchoCommand
@@ -89,6 +91,38 @@ class ShellbotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
           inThread("this is an error"),
           inThread("Command failed"),
           broadcast(s"Command `error` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      }
+    }
+  }
+  "ThreadReader" should {
+    val user = mockUser("123", "jshmoe")
+    "ignore messages that are not in thread" in {
+      val outputStream = mock[OutputStream]
+
+      val reader = system.actorOf(Shellbot.threadReader(user, threadId, outputStream))
+
+      reader ! channelMessage("some text", user = user)
+
+      verifyZeroInteractions(outputStream)
+    }
+    "ignore messages in the thread that are not sent by the creating user" in {
+      val outputStream = mock[OutputStream]
+
+      val reader = system.actorOf(Shellbot.threadReader(user, threadId, outputStream))
+
+      reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
+
+      verifyZeroInteractions(outputStream)
+    }
+    "write the message to the output stream" in {
+      val bos = new ByteArrayOutputStream()
+
+      val reader = system.actorOf(Shellbot.threadReader(user, threadId, bos))
+
+      reader ! channelMessage("some text", user = user, threadId = Some(threadId))
+
+      eventually {
+        new String(bos.toByteArray) should be("some text")
       }
     }
   }

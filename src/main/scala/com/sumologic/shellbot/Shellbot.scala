@@ -20,10 +20,12 @@ package com.sumologic.shellbot
 
 import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
 
-import akka.actor.{Actor, Props}
+import akka.actor.{Actor, ActorLogging, PoisonPill, Props}
 import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
+import com.sumologic.shellbase.{ShellBase, ShellCommandSet}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
+import slack.models.User
 
 import scala.io.Source
 
@@ -37,6 +39,10 @@ object Shellbot {
 
   def runCommand(commandSet: ShellCommandSet): Props = {
     Props(classOf[RunCommandActor], commandSet)
+  }
+
+  def threadReader(user: User, thread: String, ouputStream: OutputStream): Props = {
+    Props(classOf[ThreadReader], user, thread, ouputStream)
   }
 }
 class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
@@ -57,6 +63,8 @@ class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
       runCommandActor ! Command(messageInThread, command, new Printer(messageInThread))
+      val threadReader = context.actorOf(Shellbot.threadReader(sentByUser, parentId, new ByteArrayOutputStream()), s"threadReader-$parentId")
+      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
   }
 
   override protected def pluginReceive: Receive = {
@@ -68,6 +76,7 @@ class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
         message.say("Command failed", message.thread_ts)
         message.respond(s"Command `$command` in `$name` failed, full output available on the thread ${urlForThread(message)}.")
       }
+      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
     case Output(message, bytes) =>
       Source.fromBytes(bytes).getLines().foreach { line =>
         if (line.nonEmpty) {
@@ -99,6 +108,13 @@ class Shellbot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
 case class Output(message: IncomingMessage, bytes: Array[Byte])
 case class Command(message: IncomingMessage, command: String, output: OutputStream)
 case class Completed(message: IncomingMessage, command: String, successful: Boolean)
+class ThreadReader(user: User, watchingThread: String, outputStream: OutputStream) extends Actor with ActorLogging {
+  override def receive: Receive = {
+    case IncomingMessage(text, _, _, sentByUser, _, Some(thread)) if thread == watchingThread && sentByUser == user =>
+      outputStream.write(text.getBytes("UTF-8"))
+      outputStream.flush()
+  }
+}
 class RunCommandActor(commandSet: ShellCommandSet) extends Actor {
   override def receive: Receive = {
     case Command(message, command, output) =>
