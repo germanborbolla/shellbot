@@ -21,8 +21,9 @@ package com.sumologic.shellbot
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
 import com.sumologic.shellbase.ShellCommand
+import com.sumologic.shellbase.actor.RunCommandActor
 import com.sumologic.shellbase.commands.EchoCommand
-import com.sumologic.shellbot.model.{OutputBytes, OutputLine}
+import com.sumologic.shellbase.actor.model.{OutputBytes, OutputLine}
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit

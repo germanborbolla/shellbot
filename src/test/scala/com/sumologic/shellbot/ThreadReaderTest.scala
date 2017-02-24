@@ -18,42 +18,36 @@
  */
 package com.sumologic.shellbot
 
-import java.util.concurrent.{ArrayBlockingQueue, TimeUnit}
-
 import akka.actor.ActorSystem
+import com.sumologic.shellbase.actor.model.Input
 import com.sumologic.sumobot.test.BotPluginTestKit
 
 class ThreadReaderTest extends BotPluginTestKit(ActorSystem("threadReader"))  {
 
   private val threadId = "1487799797539.0000"
+  system.eventStream.subscribe(testActor, classOf[Input])
   "ThreadReader" should {
     val user = mockUser("123", "jshmoe")
     "ignore messages that are not in thread" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ThreadReader.props(user, threadId, queue))
+      val reader = system.actorOf(ThreadReader.props(user, threadId))
 
       reader ! channelMessage("some text", user = user)
 
-      queue should be('empty)
+      expectNoMsg()
     }
     "ignore messages in the thread that are not sent by the creating user" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ThreadReader.props(user, threadId, queue))
+      val reader = system.actorOf(ThreadReader.props(user, threadId))
 
       reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
 
-      queue should be('empty)
+      expectNoMsg()
     }
     "write the message to the output stream" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ThreadReader.props(user, threadId, queue))
+      val reader = system.actorOf(ThreadReader.props(user, threadId))
 
       reader ! channelMessage("some text", user = user, threadId = Some(threadId))
 
-      queue.poll(5, TimeUnit.SECONDS) should be("some text")
+      expectMsg(Input("some text"))
     }
   }
 

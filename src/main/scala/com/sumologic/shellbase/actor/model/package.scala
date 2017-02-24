@@ -16,27 +16,16 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
-import akka.actor.Props
-import com.sumologic.shellbase.ShellBase
-import com.sumologic.shellbase.actor.RunCommandActor
-import com.sumologic.sumobot.brain.InMemoryBrain
-import com.sumologic.sumobot.core.Bootstrap
-import com.sumologic.sumobot.plugins.PluginsFromConfig
-import org.apache.commons.cli.CommandLine
+import com.sumologic.sumobot.core.model.IncomingMessage
 
-/**
-  * Mixin for adding ShellBot to any ShellBase.
-  */
-trait ShellBot extends ShellBase { shellBase =>
-  override def init(cmdLine: CommandLine): Boolean = {
-    if (super.init(cmdLine)) {
-      Bootstrap.system.actorOf(RunCommandActor.props(name, commands), RunCommandActor.Name)
-      Bootstrap.bootstrap(Props(classOf[InMemoryBrain]), PluginsFromConfig)
-      true
-    } else {
-      false
-    }
-  }
+package object model {
+  case class Input(line: String)
+  case class OutputBytes(message: IncomingMessage, bytes: Array[Byte])
+  case class OutputLine(message: IncomingMessage, line: String)
+  case class Command(message: IncomingMessage, command: String)
+  case class Completed(message: IncomingMessage, command: String, successful: Boolean)
+  case class Commands(message: IncomingMessage, commands: Iterator[String])
+  case class Done(message: IncomingMessage)
 }

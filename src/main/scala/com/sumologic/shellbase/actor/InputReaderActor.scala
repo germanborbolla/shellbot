@@ -16,25 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
-import java.io.{ByteArrayOutputStream, OutputStream}
+import java.util.concurrent.BlockingQueue
 
-import akka.event.EventStream
-import com.sumologic.shellbot.model.OutputBytes
-import com.sumologic.sumobot.core.model.IncomingMessage
+import akka.actor.{Actor, Props}
+import com.sumologic.shellbase.actor.model.Input
 
 /**
-  * OutputStream that publishes the bytes every time it's flushed.
+  * Listens to Input messages and adds the text to the queue.
   */
-class ThreadPrinter(message: IncomingMessage, eventStream: EventStream) extends OutputStream {
-  private val bos = new ByteArrayOutputStream()
-  override def write(b: Int): Unit = {
-    bos.write(b)
+object InputReaderActor {
+  def props(queue: BlockingQueue[String]): Props = {
+    Props(classOf[InputReaderActor], queue)
   }
-
-  override def flush(): Unit = {
-    eventStream.publish(OutputBytes(message, bos.toByteArray))
-    bos.reset()
+}
+class InputReaderActor(queue: BlockingQueue[String]) extends Actor {
+  override def receive: Receive = {
+    case Input(text) =>
+      queue.put(text)
   }
 }

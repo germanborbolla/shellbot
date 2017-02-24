@@ -16,24 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
 import java.util.concurrent.LinkedBlockingQueue
 
 import akka.actor.ActorSystem
-import com.sumologic.shellbot.model.OutputLine
+import com.sumologic.shellbase.actor.model.OutputLine
 import com.sumologic.sumobot.test.BotPluginTestKit
 import org.scalatest.BeforeAndAfterEach
 
-class ShellBotShellIOTest extends BotPluginTestKit(ActorSystem("shellBotIO")) with BeforeAndAfterEach {
+class ActorShellIOTest extends BotPluginTestKit(ActorSystem("actorIO")) with BeforeAndAfterEach {
 
   private val queue = new LinkedBlockingQueue[String]()
   private val activeMessage = instantMessage("text", threadId = Some("thread"))
-  private val sut = new ShellBotShellIO(queue, system.eventStream)
+  private val sut = new ActorShellIO(queue, system.eventStream)
   system.eventStream.subscribe(testActor, classOf[OutputLine])
   sut.setActiveMessage(activeMessage)
 
-  "ShellBotShellIO" when {
+  "ActorShellIO" when {
     "reading a character" should {
       "return the first character of the head of the queue" in {
         queue.put("a")

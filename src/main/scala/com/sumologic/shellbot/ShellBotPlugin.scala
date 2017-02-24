@@ -18,8 +18,9 @@
  */
 package com.sumologic.shellbot
 
-import akka.actor.{ActorIdentity, ActorRef, Identify, Props}
-import com.sumologic.shellbot.model.{Command, Commands, Completed, OutputBytes, OutputLine}
+import akka.actor.{ActorIdentity, ActorRef, Identify, PoisonPill, Props}
+import com.sumologic.shellbase.actor.RunCommandActor
+import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, OutputBytes, OutputLine}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 
@@ -58,11 +59,15 @@ class ShellBotPlugin extends BotPlugin {
       message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
       val commandSeq = Source.fromString(commands).getLines()
       val messageInThread = message.copy(thread_ts = Some(parentId))
+      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts), s"threadReader-${message.ts}")
+      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
       runCommandActor ! Commands(messageInThread, commandSeq)
     case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
       runCommandActor ! Command(messageInThread, command)
+      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts), s"threadReader-${message.ts}")
+      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
   }
 
   override protected def pluginReceive: Receive = {
@@ -76,6 +81,8 @@ class ShellBotPlugin extends BotPlugin {
         message.say("Command failed", message.thread_ts)
         message.respond(s"Command `$command` in `$name` failed, full output available on the thread ${urlForThread(message)}.")
       }
+    case Done(message) =>
+      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
     case OutputBytes(message, bytes) =>
       Source.fromBytes(bytes).getLines().foreach { line =>
         if (line.nonEmpty) {

@@ -16,14 +16,25 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
+import java.io.{ByteArrayOutputStream, OutputStream}
+
+import akka.event.EventStream
+import com.sumologic.shellbase.actor.model.OutputBytes
 import com.sumologic.sumobot.core.model.IncomingMessage
 
-package object model {
-  case class OutputBytes(message: IncomingMessage, bytes: Array[Byte])
-  case class OutputLine(message: IncomingMessage, line: String)
-  case class Command(message: IncomingMessage, command: String)
-  case class Completed(message: IncomingMessage, command: String, successful: Boolean)
-  case class Commands(message: IncomingMessage, commands: Iterator[String])
+/**
+  * OutputStream that publishes the bytes every time it's flushed.
+  */
+class ThreadPrinter(message: IncomingMessage, eventStream: EventStream) extends OutputStream {
+  private val bos = new ByteArrayOutputStream()
+  override def write(b: Int): Unit = {
+    bos.write(b)
+  }
+
+  override def flush(): Unit = {
+    eventStream.publish(OutputBytes(message, bos.toByteArray))
+    bos.reset()
+  }
 }

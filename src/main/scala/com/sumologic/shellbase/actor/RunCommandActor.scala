@@ -16,15 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
 import java.io.PrintStream
 import java.util.concurrent.LinkedBlockingQueue
 
-import akka.actor.{Actor, PoisonPill, Props}
+import akka.actor.{Actor, Props}
+import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, Input}
 import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
-import com.sumologic.shellbot.model.{Command, Commands, Completed}
-import com.sumologic.sumobot.core.model.IncomingMessage
 
 /**
   * Executes shell commands, overrides Console.out and err during the execution.
@@ -38,38 +37,41 @@ object RunCommandActor {
 class RunCommandActor(name: String, commands: Seq[ShellCommand]) extends Actor {
 
   private val inputQueue = new LinkedBlockingQueue[String]()
-  private val shellBotIO = new ShellBotShellIO(inputQueue, context.system.eventStream)
+  private val shellBotIO = new ActorShellIO(inputQueue, context.system.eventStream)
   private val commandSet = new ShellCommandSet(name, "")
-  commandSet.commands ++= commands
-  commandSet.configureIO(shellBotIO)
+  private val inputReader = context.actorOf(InputReaderActor.props(inputQueue))
+
+  @scala.throws[Exception](classOf[Exception])
+  override def preStart(): Unit = {
+    commandSet.commands ++= commands
+    commandSet.configureIO(shellBotIO)
+
+    context.system.eventStream.subscribe(inputReader, classOf[Input])
+  }
 
   override def receive: Receive = {
     case Command(message, command) =>
       inputQueue.clear()
       shellBotIO.setActiveMessage(message)
-      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts, inputQueue), s"threadReader-${message.thread_ts.get}")
-      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
       val printStream = new PrintStream(new ThreadPrinter(message, context.system.eventStream), true)
       val successful = Console.withOut(printStream) { Console.withErr(printStream) {
         commandSet.executeLine(ShellBase.parseLine(command))
       }}
       printStream.close()
-      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
       sender() ! Completed(message, command, successful)
-    case Commands(message, commands) =>
+      sender() ! Done(message)
+    case Commands(message, commandsToRun) =>
       inputQueue.clear()
       shellBotIO.setActiveMessage(message)
-      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts, inputQueue), s"threadReader-${message.thread_ts.get}")
-      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
       val printStream = new PrintStream(new ThreadPrinter(message, context.system.eventStream), true)
-      commands.foreach { command =>
+      commandsToRun.foreach { command =>
         val successful = Console.withOut(printStream) { Console.withErr(printStream) {
           commandSet.executeLine(ShellBase.parseLine(command))
         }}
         sender() ! Completed(message, command, successful)
       }
+      sender() ! Done(message)
       printStream.close()
-      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
   }
 }
 

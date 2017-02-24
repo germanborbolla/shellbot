@@ -16,19 +16,19 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
 import java.util.concurrent.BlockingQueue
 
 import akka.event.EventStream
 import com.sumologic.shellbase.ShellIO
-import com.sumologic.shellbot.model.OutputLine
+import com.sumologic.shellbase.actor.model.OutputLine
 import com.sumologic.sumobot.core.model.IncomingMessage
 
 /**
   * ShellIO for the ShellBot.
   */
-class ShellBotShellIO(inputQueue: BlockingQueue[String], eventStream: EventStream) extends ShellIO {
+class ActorShellIO(inputQueue: BlockingQueue[String], eventStream: EventStream) extends ShellIO {
 
   private var activeMessage: IncomingMessage = _
 

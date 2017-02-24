@@ -16,25 +16,30 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.sumologic.shellbot
+package com.sumologic.shellbase.actor
 
-import akka.actor.{Actor, ActorLogging, Props}
+import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
+
+import akka.actor.ActorSystem
+import akka.testkit.TestKit
 import com.sumologic.shellbase.actor.model.Input
-import com.sumologic.sumobot.core.model.IncomingMessage
-import slack.models.User
+import org.scalatest.concurrent.Eventually
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-/**
-  * Listens for slack messages on a thread and for a given user, adds those to the event stream.
-  */
-object ThreadReader {
-  def props(user: User, watchingThread: String): Props = {
-    Props(classOf[ThreadReader], user, watchingThread)
+class InputReaderActorTest extends TestKit(ActorSystem("inputReader")) with WordSpecLike with Eventually with Matchers with BeforeAndAfterAll {
+
+  "InputReaderActor" should {
+    "add the incoming text to queue" in {
+      val inputQueue = new LinkedBlockingQueue[String]()
+      val sut = system.actorOf(InputReaderActor.props(inputQueue))
+
+      sut ! Input("some text")
+
+      inputQueue.poll(5, TimeUnit.SECONDS) should be("some text")
+    }
+  }
+
+  override protected def afterAll(): Unit = {
+    system.terminate()
   }
 }
-class ThreadReader(user: User, watchingThread: String) extends Actor with ActorLogging {
-  override def receive: Receive = {
-    case IncomingMessage(text, _, _, sentByUser, _, Some(thread)) if thread == watchingThread && sentByUser == user =>
-      context.system.eventStream.publish(Input(text))
-  }
-}
-
