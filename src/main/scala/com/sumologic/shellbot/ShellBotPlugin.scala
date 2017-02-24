@@ -20,7 +20,7 @@ package com.sumologic.shellbot
 
 import akka.actor.{ActorIdentity, ActorRef, Identify, PoisonPill, Props}
 import com.sumologic.shellbase.actor.RunCommandActor
-import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, OutputBytes, OutputLine}
+import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, Output}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 
@@ -50,8 +50,7 @@ class ShellBotPlugin extends BotPlugin {
 
   override protected def pluginPreStart(): Unit = {
     context.actorSelection(s"../${RunCommandActor.Name}") ! Identify("runCommand")
-    context.system.eventStream.subscribe(self, classOf[OutputLine])
-    context.system.eventStream.subscribe(self, classOf[OutputBytes])
+    context.system.eventStream.subscribe(self, classOf[Output])
   }
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
@@ -83,13 +82,7 @@ class ShellBotPlugin extends BotPlugin {
       }
     case Done(message) =>
       context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
-    case OutputBytes(message, bytes) =>
-      Source.fromBytes(bytes).getLines().foreach { line =>
-        if (line.nonEmpty) {
-          message.say(line, message.thread_ts)
-        }
-      }
-    case OutputLine(message, line) =>
+    case Output(message, line) =>
       message.say(line, message.thread_ts)
   }
 

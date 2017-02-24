@@ -22,7 +22,7 @@ import java.util.concurrent.BlockingQueue
 
 import akka.event.EventStream
 import com.sumologic.shellbase.ShellIO
-import com.sumologic.shellbase.actor.model.OutputLine
+import com.sumologic.shellbase.actor.model.Output
 import com.sumologic.sumobot.core.model.IncomingMessage
 
 /**
@@ -48,7 +48,7 @@ class ActorShellIO(inputQueue: BlockingQueue[String], eventStream: EventStream) 
       case s: String => s
       case _ => x.toString
     }
-    eventStream.publish(OutputLine(activeMessage, text))
+    eventStream.publish(Output(activeMessage, text))
   }
 
   override def printf(text: String, xs: Any*): Unit = {

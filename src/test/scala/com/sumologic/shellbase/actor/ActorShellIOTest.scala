@@ -21,7 +21,7 @@ package com.sumologic.shellbase.actor
 import java.util.concurrent.LinkedBlockingQueue
 
 import akka.actor.ActorSystem
-import com.sumologic.shellbase.actor.model.OutputLine
+import com.sumologic.shellbase.actor.model.Output
 import com.sumologic.sumobot.test.BotPluginTestKit
 import org.scalatest.BeforeAndAfterEach
 
@@ -30,7 +30,7 @@ class ActorShellIOTest extends BotPluginTestKit(ActorSystem("actorIO")) with Bef
   private val queue = new LinkedBlockingQueue[String]()
   private val activeMessage = instantMessage("text", threadId = Some("thread"))
   private val sut = new ActorShellIO(queue, system.eventStream)
-  system.eventStream.subscribe(testActor, classOf[OutputLine])
+  system.eventStream.subscribe(testActor, classOf[Output])
   sut.setActiveMessage(activeMessage)
 
   "ActorShellIO" when {
@@ -62,8 +62,8 @@ class ActorShellIOTest extends BotPluginTestKit(ActorSystem("actorIO")) with Bef
         sut.readLine("what's your name?") should be("panda")
         sut.readLine("what's your name again?", '*') should be("german")
 
-        expectMsg(OutputLine(activeMessage, "what's your name?"))
-        expectMsg(OutputLine(activeMessage, "what's your name again?"))
+        expectMsg(Output(activeMessage, "what's your name?"))
+        expectMsg(Output(activeMessage, "what's your name again?"))
       }
     }
     "printing" should {
@@ -74,12 +74,12 @@ class ActorShellIOTest extends BotPluginTestKit(ActorSystem("actorIO")) with Bef
       "send a message when printing" in {
         sut.print(123)
         sut.println("hello world")
-        expectMsg(OutputLine(activeMessage, "123"))
-        expectMsg(OutputLine(activeMessage, "hello world"))
+        expectMsg(Output(activeMessage, "123"))
+        expectMsg(Output(activeMessage, "hello world"))
       }
       "apply the format and then send a message" in {
         sut.printf("%d) %s%n", 1, "forge")
-        expectMsg(OutputLine(activeMessage, "1) forge"))
+        expectMsg(Output(activeMessage, "1) forge"))
       }
     }
   }

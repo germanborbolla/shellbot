@@ -21,8 +21,10 @@ package com.sumologic.shellbase.actor
 import java.io.{ByteArrayOutputStream, OutputStream}
 
 import akka.event.EventStream
-import com.sumologic.shellbase.actor.model.OutputBytes
+import com.sumologic.shellbase.actor.model.Output
 import com.sumologic.sumobot.core.model.IncomingMessage
+
+import scala.io.Source
 
 /**
   * OutputStream that publishes the bytes every time it's flushed.
@@ -34,7 +36,11 @@ class ThreadPrinter(message: IncomingMessage, eventStream: EventStream) extends 
   }
 
   override def flush(): Unit = {
-    eventStream.publish(OutputBytes(message, bos.toByteArray))
+    Source.fromBytes(bos.toByteArray).getLines().foreach { line =>
+      if (line.nonEmpty) {
+        eventStream.publish(Output(message, line))
+      }
+    }
     bos.reset()
   }
 }

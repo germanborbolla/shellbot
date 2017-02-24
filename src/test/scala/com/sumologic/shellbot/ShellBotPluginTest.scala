@@ -23,7 +23,7 @@ import akka.testkit.TestKit
 import com.sumologic.shellbase.ShellCommand
 import com.sumologic.shellbase.actor.RunCommandActor
 import com.sumologic.shellbase.commands.EchoCommand
-import com.sumologic.shellbase.actor.model.{OutputBytes, OutputLine}
+import com.sumologic.shellbase.actor.model.Output
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
@@ -113,15 +113,8 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
       }
     }
     "dealing with output" should {
-      "send all the lines in the byte array" in {
-        val bytes = """hello there
-                      |how is it going""".stripMargin.getBytes()
-        sut ! OutputBytes(instantMessage("text", threadId = Some(threadId)), bytes)
-
-        checkForMessages(Seq(inThread("hello there"), inThread("how is it going")))
-      }
       "send the line" in {
-        sut ! OutputLine(instantMessage("text", threadId = Some(threadId)), "are you there?")
+        sut ! Output(instantMessage("text", threadId = Some(threadId)), "are you there?")
         checkForMessages(Seq(inThread("are you there?")))
       }
     }

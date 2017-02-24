@@ -22,8 +22,7 @@ import com.sumologic.sumobot.core.model.IncomingMessage
 
 package object model {
   case class Input(line: String)
-  case class OutputBytes(message: IncomingMessage, bytes: Array[Byte])
-  case class OutputLine(message: IncomingMessage, line: String)
+  case class Output(message: IncomingMessage, line: String)
   case class Command(message: IncomingMessage, command: String)
   case class Completed(message: IncomingMessage, command: String, successful: Boolean)
   case class Commands(message: IncomingMessage, commands: Iterator[String])
