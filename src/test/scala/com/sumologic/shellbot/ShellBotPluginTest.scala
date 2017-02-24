@@ -18,98 +18,37 @@
  */
 package com.sumologic.shellbot
 
-import akka.actor.ActorSystem
-import akka.testkit.TestKit
-import com.sumologic.shellbase.ShellCommand
+import akka.actor.{ActorIdentity, ActorSystem}
+import akka.testkit.{TestKit, TestProbe}
 import com.sumologic.shellbase.actor.RunCommandActor
-import com.sumologic.shellbase.commands.EchoCommand
-import com.sumologic.shellbase.actor.model.Output
+import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, Output}
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
 import com.typesafe.config.ConfigFactory
-import org.apache.commons.cli.CommandLine
 import org.mockito.Mockito._
-import org.scalatest.BeforeAndAfterAll
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.mock.MockitoSugar
 import slack.models.Team
 import slack.rtm.RtmState
 
 import scala.concurrent.duration._
 
-class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", ConfigFactory.parseResourcesAnySyntax("application.conf").resolve())) with BeforeAndAfterAll with MockitoSugar {
+class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", ConfigFactory.parseResourcesAnySyntax("application.conf").resolve())) with BeforeAndAfterAll with BeforeAndAfterEach with MockitoSugar {
 
-  private val testCommands = Seq(
-    new ShellCommand("multi", "multi") {
-      override def execute(cmdLine: CommandLine) = {
-        println("""hello
-                  |world!""".stripMargin
-        )
-        true
-      }
-    },
-    new ShellCommand("error", "error") {
-      override def execute(cmdLine: CommandLine) = {
-        Console.err.println("this is an error")
-        false
-      }
-    },
-    new ShellCommand("ask", "ask") {
-      override def execute(cmdLine: CommandLine) = {
-        val name = prompter.askQuestion("who are you?")
-        println(s"Hello $name, now die!")
-        true
-      }
-    },
-    new EchoCommand)
-
-  system.actorOf(RunCommandActor.props("test", testCommands), "runCommand")
+  val runCommandProbe = TestProbe(RunCommandActor.Name)
   private val sut = system.actorOf(ShellBotPlugin.props(), "shell")
-  private val state = mock[RtmState]
-  when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
-  sut ! InitializePlugin(state, null, null)
 
   private val threadId = "1487799797539.0000"
 
-  "Shellbot" when {
+  "ShellBotPlugin" when {
     "executing single commands" should {
-      "execute the command and send the output" in {
-        sut ! instantMessage("execute echo hello world!", id = threadId)
-        checkForMessages(Seq(inThread("Executing: `echo hello world!` in `test`"),
-          inThread("hello world!"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `echo hello world!` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
-      }
-      "send all the lines in the output" in {
-        sut ! instantMessage("execute multi", id = threadId)
-        checkForMessages(Seq(inThread("Executing: `multi` in `test`"),
-          inThread("hello"),
-          inThread("world!"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `multi` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
-      }
-      "send the output when a command doesn't exist" in {
-        sut ! instantMessage("execute badcommand", id = threadId)
-        checkForMessages(Seq(inThread("Executing: `badcommand` in `test`"),
-          inThread("test: command badcommand not found"),
-          inThread("Command failed"),
-          broadcast(s"Command `badcommand` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
-      }
-      "send stuff in err as well" in {
-        sut ! instantMessage("execute error", id = threadId)
-        checkForMessages(Seq(inThread("Executing: `error` in `test`"),
-          inThread("this is an error"),
-          inThread("Command failed"),
-          broadcast(s"Command `error` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
-      }
-      "read input from the thread and give it to the command" in {
-        sut ! instantMessage("execute ask", id = threadId)
-        checkForMessages(Seq(inThread("Executing: `ask` in `test`"),
-          inThread("who are you?: ")))
-        system.eventStream.publish(instantMessage("panda", threadId = Some(threadId)))
-        checkForMessages(Seq(inThread("Hello panda, now die!"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `ask` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      "ask the runCommand actor to execute the command and notify that we're executing" in {
+        val message = instantMessage("execute echo hello world!", id = threadId)
+        sut ! message
+        checkForMessages(Seq(inThread("Executing: `echo hello world!` in `test`")))
+        runCommandProbe.expectMsg(Command(message.copy(thread_ts = Some(threadId)), "echo hello world!"))
+        sut ! Done(message.copy(thread_ts = Some(threadId)))
       }
     }
     "dealing with output" should {
@@ -117,29 +56,29 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         sut ! Output(instantMessage("text", threadId = Some(threadId)), "are you there?")
         checkForMessages(Seq(inThread("are you there?")))
       }
+      "send the messages when the command completes successfully" in {
+        sut ! Completed(instantMessage("text", threadId = Some(threadId)), "multi", true)
+        checkForMessages(Seq(inThread("Command succeeded"),
+          broadcast(s"Command `multi` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      }
+      "send the messages when the command fails" in {
+        sut ! Completed(instantMessage("text", threadId = Some(threadId)), "multi", false)
+        checkForMessages(Seq(inThread("Command failed"),
+          broadcast(s"Command `multi` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      }
     }
     "executing multiple commands" should {
-      "execute all commands in a ``` block" in {
-        sut ! instantMessage(
-          """execute ```echo hello
+      "ask the runCommand actor to execute the commands and notify that we're executing" in {
+        val message = instantMessage( """execute ```echo hello
             |multi
             |ask```""".stripMargin, id = threadId)
+        sut ! message
         checkForMessages(Seq(inThread(
           """Executing: ```echo hello
             |multi
-            |ask``` in `test`""".stripMargin),
-          inThread("hello"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `echo hello` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000."),
-          inThread("hello"),
-          inThread("world!"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `multi` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000."),
-          inThread("who are you?: ")))
-        system.eventStream.publish(instantMessage("panda", threadId = Some(threadId)))
-        checkForMessages(Seq(inThread("Hello panda, now die!"),
-          inThread("Command succeeded"),
-          broadcast(s"Command `ask` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+            |ask``` in `test`""".stripMargin)))
+        runCommandProbe.expectMsg(Commands(message.copy(thread_ts = Some(threadId)), Seq("echo hello", "multi", "ask")))
+        sut ! Done(message.copy(thread_ts = Some(threadId)))
       }
     }
   }
@@ -151,6 +90,13 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)
+  }
+
+  override protected def beforeEach(): Unit = {
+    val state = mock[RtmState]
+    when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
+    sut ! InitializePlugin(state, null, null)
+    sut ! ActorIdentity("runCommand", Some(runCommandProbe.ref))
   }
 
   private def inThread(message: String, thread: String = threadId): MessageAndThread = {

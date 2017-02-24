@@ -56,11 +56,11 @@ class ShellBotPlugin extends BotPlugin {
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
     case message@IncomingMessage(MultiExecute(commands), true, _, _, parentId, None) =>
       message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
-      val commandSeq = Source.fromString(commands).getLines()
+      val commandSeq = commands.split("\n")
       val messageInThread = message.copy(thread_ts = Some(parentId))
       val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts), s"threadReader-${message.ts}")
       context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
-      runCommandActor ! Commands(messageInThread, commandSeq)
+      runCommandActor ! Commands(messageInThread, commandSeq.toSeq)
     case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
@@ -81,7 +81,7 @@ class ShellBotPlugin extends BotPlugin {
         message.respond(s"Command `$command` in `$name` failed, full output available on the thread ${urlForThread(message)}.")
       }
     case Done(message) =>
-      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
+      context.child(s"threadReader-${message.thread_ts.get}").foreach(_ ! PoisonPill)
     case Output(message, line) =>
       message.say(line, message.thread_ts)
   }

@@ -119,7 +119,7 @@ class RunCommandActorTest extends BotPluginTestKit(ActorSystem("Shellbot", Confi
   }
 
   private def commands(strings: Seq[String]): Commands = {
-    Commands(message, strings.iterator)
+    Commands(message, strings)
   }
 
   private def output(string: String): Output = {
