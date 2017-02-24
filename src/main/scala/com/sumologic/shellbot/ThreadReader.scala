@@ -18,24 +18,24 @@
   */
 package com.sumologic.shellbot
 
-import akka.actor.Props
-import com.sumologic.shellbase.ShellBase
-import com.sumologic.sumobot.brain.InMemoryBrain
-import com.sumologic.sumobot.core.Bootstrap
-import com.sumologic.sumobot.plugins.PluginsFromConfig
-import org.apache.commons.cli.CommandLine
+import java.util.concurrent.BlockingQueue
+
+import akka.actor.{Actor, ActorLogging, Props}
+import com.sumologic.sumobot.core.model.IncomingMessage
+import slack.models.User
 
 /**
-  * Mixin for adding ShellBot to any ShellBase.
+  * Listens for slack messages on a thread and for a given user, adds those to the provided queue.
   */
-trait ShellBot extends ShellBase { shellBase =>
-  override def init(cmdLine: CommandLine): Boolean = {
-    if (super.init(cmdLine)) {
-      Bootstrap.system.actorOf(RunCommandActor.props(name, commands), RunCommandActor.Name)
-      Bootstrap.bootstrap(Props(classOf[InMemoryBrain]), PluginsFromConfig)
-      true
-    } else {
-      false
-    }
+object ThreadReader {
+  def props(user: User, watchingThread: String, queue: BlockingQueue[String]): Props = {
+    Props(classOf[ThreadReader], user, watchingThread, queue)
   }
 }
+class ThreadReader(user: User, watchingThread: String, queue: BlockingQueue[String]) extends Actor with ActorLogging {
+  override def receive: Receive = {
+    case IncomingMessage(text, _, _, sentByUser, _, Some(thread)) if thread == watchingThread && sentByUser == user =>
+      queue.put(text)
+  }
+}
+

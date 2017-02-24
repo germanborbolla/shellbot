@@ -18,15 +18,15 @@
  */
 package com.sumologic.shellbot
 
-import java.util.concurrent.{ArrayBlockingQueue, TimeUnit}
-
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
 import com.sumologic.shellbase.ShellCommand
 import com.sumologic.shellbase.commands.EchoCommand
+import com.sumologic.shellbot.model.{OutputBytes, OutputLine}
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
+import com.typesafe.config.ConfigFactory
 import org.apache.commons.cli.CommandLine
 import org.mockito.Mockito._
 import org.scalatest.BeforeAndAfterAll
@@ -36,7 +36,7 @@ import slack.rtm.RtmState
 
 import scala.concurrent.duration._
 
-class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with BeforeAndAfterAll with MockitoSugar {
+class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", ConfigFactory.parseResourcesAnySyntax("application.conf").resolve())) with BeforeAndAfterAll with MockitoSugar {
 
   private val testCommands = Seq(
     new ShellCommand("multi", "multi") {
@@ -62,7 +62,8 @@ class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
     },
     new EchoCommand)
 
-  private val sut = system.actorOf(ShellBot.props("test", testCommands))
+  system.actorOf(RunCommandActor.props("test", testCommands), "runCommand")
+  private val sut = system.actorOf(ShellBotPlugin.props(), "shell")
   private val state = mock[RtmState]
   when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
   sut ! InitializePlugin(state, null, null)
@@ -122,36 +123,6 @@ class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
         sut ! OutputLine(instantMessage("text", threadId = Some(threadId)), "are you there?")
         checkForMessages(Seq(inThread("are you there?")))
       }
-    }
-  }
-  "ThreadReader" should {
-    val user = mockUser("123", "jshmoe")
-    "ignore messages that are not in thread" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
-
-      reader ! channelMessage("some text", user = user)
-
-      queue should be('empty)
-    }
-    "ignore messages in the thread that are not sent by the creating user" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
-
-      reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
-
-      queue should be('empty)
-    }
-    "write the message to the output stream" in {
-      val queue = new ArrayBlockingQueue[String](100)
-
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
-
-      reader ! channelMessage("some text", user = user, threadId = Some(threadId))
-
-      queue.poll(5, TimeUnit.SECONDS) should be("some text")
     }
   }
 

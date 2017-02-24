@@ -1,0 +1,21 @@
+slack {
+  api.token = ""
+}
+
+akka {
+  loggers = ["akka.event.slf4j.Slf4jLogger"]
+  loglevel = "DEBUG"
+}
+
+plugins {
+  shell {
+    enabled = true
+    class = "com.sumologic.shellbot.ShellBotPlugin"
+    name = "example"
+  }
+
+  help {
+    enabled = true
+    class = "com.sumologic.sumobot.plugins.help.Help"
+  }
+}

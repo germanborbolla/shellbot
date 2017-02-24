@@ -3,6 +3,7 @@ package com.sumologic.shellbot
 import java.util.concurrent.LinkedBlockingQueue
 
 import akka.actor.ActorSystem
+import com.sumologic.shellbot.model.OutputLine
 import com.sumologic.sumobot.test.BotPluginTestKit
 import org.scalatest.BeforeAndAfterEach
 
@@ -10,7 +11,8 @@ class ShellBotShellIOTest extends BotPluginTestKit(ActorSystem("shellBotIO")) wi
 
   private val queue = new LinkedBlockingQueue[String]()
   private val activeMessage = instantMessage("text", threadId = Some("thread"))
-  private val sut = new ShellBotShellIO(queue, testActor)
+  private val sut = new ShellBotShellIO(queue, system.eventStream)
+  system.eventStream.subscribe(testActor, classOf[OutputLine])
   sut.setActiveMessage(activeMessage)
 
   "ShellBotShellIO" when {

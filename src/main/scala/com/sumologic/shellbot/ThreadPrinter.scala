@@ -18,24 +18,23 @@
   */
 package com.sumologic.shellbot
 
-import akka.actor.Props
-import com.sumologic.shellbase.ShellBase
-import com.sumologic.sumobot.brain.InMemoryBrain
-import com.sumologic.sumobot.core.Bootstrap
-import com.sumologic.sumobot.plugins.PluginsFromConfig
-import org.apache.commons.cli.CommandLine
+import java.io.{ByteArrayOutputStream, OutputStream}
+
+import akka.event.EventStream
+import com.sumologic.shellbot.model.OutputBytes
+import com.sumologic.sumobot.core.model.IncomingMessage
 
 /**
-  * Mixin for adding ShellBot to any ShellBase.
+  * OutputStream that publishes the bytes every time it's flushed.
   */
-trait ShellBot extends ShellBase { shellBase =>
-  override def init(cmdLine: CommandLine): Boolean = {
-    if (super.init(cmdLine)) {
-      Bootstrap.system.actorOf(RunCommandActor.props(name, commands), RunCommandActor.Name)
-      Bootstrap.bootstrap(Props(classOf[InMemoryBrain]), PluginsFromConfig)
-      true
-    } else {
-      false
-    }
+class ThreadPrinter(message: IncomingMessage, eventStream: EventStream) extends OutputStream {
+  private val bos = new ByteArrayOutputStream()
+  override def write(b: Int): Unit = {
+    bos.write(b)
+  }
+
+  override def flush(): Unit = {
+    eventStream.publish(OutputBytes(message, bos.toByteArray))
+    bos.reset()
   }
 }
