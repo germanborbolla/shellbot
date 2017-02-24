@@ -124,6 +124,30 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         checkForMessages(Seq(inThread("are you there?")))
       }
     }
+    "executing multiple commands" should {
+      "execute all commands in a ``` block" in {
+        sut ! instantMessage(
+          """execute ```echo hello
+            |multi
+            |ask```""".stripMargin, id = threadId)
+        checkForMessages(Seq(inThread(
+          """Executing: ```echo hello
+            |multi
+            |ask``` in `test`""".stripMargin),
+          inThread("hello"),
+          inThread("Command succeeded"),
+          broadcast(s"Command `echo hello` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000."),
+          inThread("hello"),
+          inThread("world!"),
+          inThread("Command succeeded"),
+          broadcast(s"Command `multi` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000."),
+          inThread("who are you?: ")))
+        system.eventStream.publish(instantMessage("panda", threadId = Some(threadId)))
+        checkForMessages(Seq(inThread("Hello panda, now die!"),
+          inThread("Command succeeded"),
+          broadcast(s"Command `ask` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      }
+    }
   }
 
   private def checkForMessages(expectedMessages: Seq[MessageAndThread], timeout: FiniteDuration = 5.seconds): Unit = {

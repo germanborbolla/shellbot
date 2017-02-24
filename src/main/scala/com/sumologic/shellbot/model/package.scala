@@ -25,4 +25,5 @@ package object model {
   case class OutputLine(message: IncomingMessage, line: String)
   case class Command(message: IncomingMessage, command: String)
   case class Completed(message: IncomingMessage, command: String, successful: Boolean)
+  case class Commands(message: IncomingMessage, commands: Iterator[String])
 }

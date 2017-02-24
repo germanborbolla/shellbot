@@ -19,7 +19,7 @@
 package com.sumologic.shellbot
 
 import akka.actor.{ActorIdentity, ActorRef, Identify, Props}
-import com.sumologic.shellbot.model.{Command, Completed, OutputBytes, OutputLine}
+import com.sumologic.shellbot.model.{Command, Commands, Completed, OutputBytes, OutputLine}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 
@@ -43,6 +43,7 @@ class ShellBotPlugin extends BotPlugin {
     """.stripMargin
 
   private val SingleExecute = matchText(s"execute (.*)")
+  private val MultiExecute = matchText(s"execute ```(.*)```")
 
   private var runCommandActor: ActorRef = _
 
@@ -53,6 +54,11 @@ class ShellBotPlugin extends BotPlugin {
   }
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
+    case message@IncomingMessage(MultiExecute(commands), true, _, _, parentId, None) =>
+      message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
+      val commandSeq = Source.fromString(commands).getLines()
+      val messageInThread = message.copy(thread_ts = Some(parentId))
+      runCommandActor ! Commands(messageInThread, commandSeq)
     case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))

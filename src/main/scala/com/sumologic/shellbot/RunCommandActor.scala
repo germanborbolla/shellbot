@@ -23,7 +23,7 @@ import java.util.concurrent.LinkedBlockingQueue
 
 import akka.actor.{Actor, PoisonPill, Props}
 import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
-import com.sumologic.shellbot.model.{Command, Completed}
+import com.sumologic.shellbot.model.{Command, Commands, Completed}
 import com.sumologic.sumobot.core.model.IncomingMessage
 
 /**
@@ -56,6 +56,20 @@ class RunCommandActor(name: String, commands: Seq[ShellCommand]) extends Actor {
       printStream.close()
       context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
       sender() ! Completed(message, command, successful)
+    case Commands(message, commands) =>
+      inputQueue.clear()
+      shellBotIO.setActiveMessage(message)
+      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts, inputQueue), s"threadReader-${message.thread_ts.get}")
+      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
+      val printStream = new PrintStream(new ThreadPrinter(message, context.system.eventStream), true)
+      commands.foreach { command =>
+        val successful = Console.withOut(printStream) { Console.withErr(printStream) {
+          commandSet.executeLine(ShellBase.parseLine(command))
+        }}
+        sender() ! Completed(message, command, successful)
+      }
+      printStream.close()
+      context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
   }
 }
 
