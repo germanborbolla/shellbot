@@ -19,9 +19,10 @@
 package com.sumologic.shellbot
 
 import java.io.{ByteArrayOutputStream, OutputStream, PrintStream}
+import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 
 import akka.actor.{Actor, ActorLogging, PoisonPill, Props}
-import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet}
+import com.sumologic.shellbase.{ShellBase, ShellCommand, ShellCommandSet, ShellPrompter}
 import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
 import slack.models.User
@@ -40,8 +41,8 @@ object ShellBot {
     Props(classOf[RunCommandActor], commandSet)
   }
 
-  def threadReader(user: User, thread: String, ouputStream: OutputStream): Props = {
-    Props(classOf[ThreadReader], user, thread, ouputStream)
+  def threadReader(user: User, thread: String, queue: BlockingQueue[String]): Props = {
+    Props(classOf[ThreadReader], user, thread, queue)
   }
 }
 class ShellBot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
@@ -53,16 +54,21 @@ class ShellBot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
 
   private val SingleExecute = matchText(s"execute (.*)")
 
+  private val inputQueue = new LinkedBlockingQueue[String]()
+  private val shellBotIO = new ShellBotShellIO(inputQueue, self)
   private val commandSet = new ShellCommandSet(name, "")
   commandSet.commands ++= commands
+  commandSet.configureIO(shellBotIO)
   private val runCommandActor = context.actorOf(ShellBot.runCommand(commandSet), "runCommand")
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
     case message@IncomingMessage(SingleExecute(command), true, _, sentByUser, parentId, None) =>
       message.respond(s"Executing: `$command` in `$name`", Some(parentId))
       val messageInThread = message.copy(thread_ts = Some(parentId))
+      inputQueue.clear()
+      shellBotIO.setActiveMessage(messageInThread)
       runCommandActor ! Command(messageInThread, command, new Printer(messageInThread))
-      val threadReader = context.actorOf(ShellBot.threadReader(sentByUser, parentId, new ByteArrayOutputStream()), s"threadReader-$parentId")
+      val threadReader = context.actorOf(ShellBot.threadReader(sentByUser, parentId, inputQueue), s"threadReader-$parentId")
       context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
   }
 
@@ -76,12 +82,14 @@ class ShellBot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
         message.respond(s"Command `$command` in `$name` failed, full output available on the thread ${urlForThread(message)}.")
       }
       context.child(s"threadReader-${message.thread_ts.get}").get ! PoisonPill
-    case Output(message, bytes) =>
+    case OutputBytes(message, bytes) =>
       Source.fromBytes(bytes).getLines().foreach { line =>
         if (line.nonEmpty) {
           message.say(line, message.thread_ts)
         }
       }
+    case OutputLine(message, line) =>
+      message.say(line, message.thread_ts)
   }
 
   private def urlForThread(message: IncomingMessage): String = {
@@ -99,19 +107,19 @@ class ShellBot(name: String, commands: Seq[ShellCommand]) extends BotPlugin {
     }
 
     override def flush(): Unit = {
-      self ! Output(message, bos.toByteArray)
+      self ! OutputBytes(message, bos.toByteArray)
       bos.reset()
     }
   }
 }
-case class Output(message: IncomingMessage, bytes: Array[Byte])
+case class OutputBytes(message: IncomingMessage, bytes: Array[Byte])
+case class OutputLine(message: IncomingMessage, line: String)
 case class Command(message: IncomingMessage, command: String, output: OutputStream)
 case class Completed(message: IncomingMessage, command: String, successful: Boolean)
-class ThreadReader(user: User, watchingThread: String, outputStream: OutputStream) extends Actor with ActorLogging {
+class ThreadReader(user: User, watchingThread: String, queue: BlockingQueue[String]) extends Actor with ActorLogging {
   override def receive: Receive = {
     case IncomingMessage(text, _, _, sentByUser, _, Some(thread)) if thread == watchingThread && sentByUser == user =>
-      outputStream.write(text.getBytes("UTF-8"))
-      outputStream.flush()
+      queue.put(text)
   }
 }
 class RunCommandActor(commandSet: ShellCommandSet) extends Actor {

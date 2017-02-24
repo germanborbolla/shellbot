@@ -18,7 +18,7 @@
  */
 package com.sumologic.shellbot
 
-import java.io.{ByteArrayOutputStream, OutputStream}
+import java.util.concurrent.{ArrayBlockingQueue, TimeUnit}
 
 import akka.actor.ActorSystem
 import akka.testkit.TestKit
@@ -51,6 +51,13 @@ class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
       override def execute(cmdLine: CommandLine) = {
         Console.err.println("this is an error")
         false
+      }
+    },
+    new ShellCommand("ask", "ask") {
+      override def execute(cmdLine: CommandLine) = {
+        val name = prompter.askQuestion("who are you?")
+        println(s"Hello $name, now die!")
+        true
       }
     },
     new EchoCommand)
@@ -93,38 +100,58 @@ class ShellBotTest extends BotPluginTestKit(ActorSystem("Shellbot")) with Before
           inThread("Command failed"),
           broadcast(s"Command `error` in `test` failed, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
       }
+      "read input from the thread and give it to the command" in {
+        sut ! instantMessage("execute ask", id = threadId)
+        checkForMessages(Seq(inThread("Executing: `ask` in `test`"),
+          inThread("who are you?: ")))
+        system.eventStream.publish(instantMessage("panda", threadId = Some(threadId)))
+        checkForMessages(Seq(inThread("Hello panda, now die!"),
+          inThread("Command succeeded"),
+          broadcast(s"Command `ask` in `test` finished successfully, full output available on the thread https://team.slack.com/conversation/125/p14877997975390000.")))
+      }
+    }
+    "dealing with output" should {
+      "send all the lines in the byte array" in {
+        val bytes = """hello there
+                      |how is it going""".stripMargin.getBytes()
+        sut ! OutputBytes(instantMessage("text", threadId = Some(threadId)), bytes)
+
+        checkForMessages(Seq(inThread("hello there"), inThread("how is it going")))
+      }
+      "send the line" in {
+        sut ! OutputLine(instantMessage("text", threadId = Some(threadId)), "are you there?")
+        checkForMessages(Seq(inThread("are you there?")))
+      }
     }
   }
   "ThreadReader" should {
     val user = mockUser("123", "jshmoe")
     "ignore messages that are not in thread" in {
-      val outputStream = mock[OutputStream]
+      val queue = new ArrayBlockingQueue[String](100)
 
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, outputStream))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
 
       reader ! channelMessage("some text", user = user)
 
-      verifyZeroInteractions(outputStream)
+      queue should be('empty)
     }
     "ignore messages in the thread that are not sent by the creating user" in {
-      val outputStream = mock[OutputStream]
+      val queue = new ArrayBlockingQueue[String](100)
 
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, outputStream))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
 
       reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
 
-      verifyZeroInteractions(outputStream)
+      queue should be('empty)
     }
     "write the message to the output stream" in {
-      val bos = new ByteArrayOutputStream()
+      val queue = new ArrayBlockingQueue[String](100)
 
-      val reader = system.actorOf(ShellBot.threadReader(user, threadId, bos))
+      val reader = system.actorOf(ShellBot.threadReader(user, threadId, queue))
 
       reader ! channelMessage("some text", user = user, threadId = Some(threadId))
 
-      eventually {
-        new String(bos.toByteArray) should be("some text")
-      }
+      queue.poll(5, TimeUnit.SECONDS) should be("some text")
     }
   }
 

@@ -33,7 +33,18 @@ import org.apache.commons.cli.CommandLine
 object ExampleShell extends ShellBase("example") {
   override def commands: Seq[ShellCommand] = {
     Seq(
-      new RNGCommandSet
+      new RNGCommandSet,
+      new ShellCommand("ask", "gets your name for nefarious purposes") {
+        override def execute(cmdLine: CommandLine) = {
+          val name = prompter.askQuestion("What's your name?")
+          if (prompter.confirm(s"$name do think I'm awesome?")) {
+            println(s"I like you $name")
+          } else {
+            println(s"Die $name!")
+          }
+          true
+        }
+      }
     )
   }
 
