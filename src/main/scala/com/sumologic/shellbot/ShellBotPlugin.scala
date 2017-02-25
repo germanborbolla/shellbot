@@ -50,13 +50,14 @@ class ShellBotPlugin extends BotPlugin {
   override protected def help =
     s"""Execute commands:
       |
-      |execute - Run a single command on $name
+      |execute - Run a single command on $name, format: "execute `command` in `$name`"
+      |multi - Run multiple commands on $name, format: "execute ```commands``` in `$name`"
       |authorize - Authorize user to run commands, get the code by running `shellBot getCode` on the shell.
     """.stripMargin
 
-  private val SingleExecute = matchText(s"execute (.*)")
-  private val MultiExecute = matchText(s"execute ```(.*)```")
-  private val Authorize = matchText(s"authorize me with code (.*)")
+  private val SingleExecute = matchText("execute `(.*)` in `(.*)`")
+  private val MultiExecute = matchText(s"multi ```(.*)``` in `(.*)`")
+  private val Authorize = matchText(s"authorize me in `(.*)` with code (.*)")
 
   private var runCommandActor: ActorRef = _
 
@@ -71,8 +72,8 @@ class ShellBotPlugin extends BotPlugin {
   }
 
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(MultiExecute(commands), true, _, user, parentId, None) =>
-      onlyIfAuthorized(message) {
+    case message@IncomingMessage(MultiExecute(commands, desiredShell), true, _, user, parentId, None) =>
+      onlyIfAuthorized(message, desiredShell) {
         message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
         val commandSeq = commands.split("\n")
         val messageInThread = message.copy(thread_ts = Some(parentId))
@@ -80,33 +81,37 @@ class ShellBotPlugin extends BotPlugin {
         context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
         runCommandActor ! Commands(messageInThread, commandSeq.toSeq)
       }
-    case message@IncomingMessage(SingleExecute(command), true, _, user, parentId, None) =>
-      onlyIfAuthorized(message) {
+    case message@IncomingMessage(SingleExecute(command, desiredShell), true, _, user, parentId, None) =>
+      onlyIfAuthorized(message, desiredShell) {
         message.respond(s"Executing: `$command` in `$name`", Some(parentId))
         val messageInThread = message.copy(thread_ts = Some(parentId))
         runCommandActor ! Command(messageInThread, command)
         val threadReader = context.actorOf(Props(classOf[ThreadReader], user, parentId), s"threadReader-$parentId")
         context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
       }
-    case message@IncomingMessage(Authorize(code), _, PublicChannel(_,_), user, _, _) =>
+    case message@IncomingMessage(Authorize(_, _), _, PublicChannel(_,_), user, _, _) =>
       brain ! Remove(s"accessCode.${user.name}")
       message.respond(s"authorize is not allowed in public channels, access code is now invalid")
-    case message@IncomingMessage(Authorize(code), _, GroupChannel(_,_), user, _, _) =>
+    case message@IncomingMessage(Authorize(_, _), _, GroupChannel(_,_), user, _, _) =>
       brain ! Remove(s"accessCode.${user.name}")
       message.respond(s"authorize is not allowed in public channels, access code is now invalid")
-    case message@IncomingMessage(Authorize(code), _, InstantMessageChannel(_,_), user, _, _) =>
-      implicit val timeout = Timeout(2.seconds)
-      Await.result(brain ? Retrieve(s"accessCode.${user.name}"), 2.seconds) match {
-        case ValueRetrieved(_, value) =>
-          if (value == code) {
-            authorizedUsers.append(user)
-            brain ! Remove(s"accessCode.${user.name}")
-            message.respond(s"authorized, you can run commands on `$name`")
-          } else {
-            message.respond("access code is invalid")
-          }
-        case ValueMissing(_) =>
-          message.respond(s"no access code for you, you can add one by executing `shellBot getCode`")
+    case message@IncomingMessage(Authorize(desiredShell, code), _, InstantMessageChannel(_,_), user, _, _) =>
+      if (desiredShell == name) {
+        implicit val timeout = Timeout(2.seconds)
+        Await.result(brain ? Retrieve(s"accessCode.${user.name}"), 2.seconds) match {
+          case ValueRetrieved(_, value) =>
+            if (value == code) {
+              authorizedUsers.append(user)
+              brain ! Remove(s"accessCode.${user.name}")
+              message.respond(s"authorized, you can run commands on `$name`")
+            } else {
+              message.respond("access code is invalid")
+            }
+          case ValueMissing(_) =>
+            message.respond(s"no access code for you, you can add one by executing `shellBot getCode`")
+        }
+      } else {
+        message.respond("wrong shell dude")
       }
   }
 
@@ -127,8 +132,8 @@ class ShellBotPlugin extends BotPlugin {
       message.say(line, message.thread_ts)
   }
 
-  private def onlyIfAuthorized(message: IncomingMessage)(f: => Unit) = {
-    if (authorizedUsers.contains(message.sentByUser)) {
+  private def onlyIfAuthorized(message: IncomingMessage, desiredShell: String)(f: => Unit) = {
+    if (authorizedUsers.contains(message.sentByUser) && desiredShell == name) {
       f
     }
   }

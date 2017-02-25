@@ -47,7 +47,7 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
   "ShellBotPlugin" when {
     "executing single commands" should {
       "ask the runCommand actor to execute the command and notify that we're executing" in {
-        val message = instantMessage("execute echo hello world!", id = threadId)
+        val message = instantMessage(commandText("echo hello world!"), id = threadId)
         sut ! message
         checkForMessages(Seq(inThread("Executing: `echo hello world!` in `test`")))
         runCommandProbe.expectMsg(Command(message.copy(thread_ts = Some(threadId)), "echo hello world!"))
@@ -55,11 +55,17 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
       }
       "not execute if the user is not in the authorized user list" in {
         val evilUser = mockUser("124", "evil")
-        val message = instantMessage("execute echo hello world!", user = evilUser, id = threadId)
+        val message = instantMessage(commandText("echo hello world!"), user = evilUser, id = threadId)
         sut ! message
         outgoingMessageProbe.expectNoMsg()
         runCommandProbe.expectNoMsg()
         sut ! Done(message.copy(thread_ts = Some(threadId)))
+      }
+      "not execute if the shell doesn't match the configured one" in {
+        val message = instantMessage(commandText("echo hello world!", "dsh"), id = threadId)
+        sut ! message
+        outgoingMessageProbe.expectNoMsg()
+        runCommandProbe.expectNoMsg()
       }
     }
     "dealing with output" should {
@@ -80,9 +86,7 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
     }
     "executing multiple commands" should {
       "ask the runCommand actor to execute the commands and notify that we're executing" in {
-        val message = instantMessage( """execute ```echo hello
-            |multi
-            |ask```""".stripMargin, id = threadId)
+        val message = instantMessage(multiCommandText(Seq("echo hello", "multi", "ask")), id = threadId)
         sut ! message
         checkForMessages(Seq(inThread(
           """Executing: ```echo hello
@@ -93,9 +97,13 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
       }
       "not execute if the user is not in the authorized user list" in {
         val evilUser = mockUser("124", "evil")
-        val message = instantMessage( """execute ```echo hello
-                                        |multi
-                                        |ask```""".stripMargin, user = evilUser, id = threadId)
+        val message = instantMessage(multiCommandText(Seq("echo hello", "multi", "ask")), user = evilUser, id = threadId)
+        sut ! message
+        outgoingMessageProbe.expectNoMsg()
+        runCommandProbe.expectNoMsg()
+      }
+      "not execute if the shell doesn't match the configured one" in {
+        val message = instantMessage(multiCommandText(Seq("echo hello", "multi", "ask"), "dsh"), id = threadId)
         sut ! message
         outgoingMessageProbe.expectNoMsg()
         runCommandProbe.expectNoMsg()
@@ -106,7 +114,7 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         blockingBrain.store(s"accessCode.panda", "abcdef")
 
         val user = mockUser("123", "panda")
-        sut ! publicChannelMessage(s"authorize me with code abcdef", user = user, addressedToUs = true)
+        sut ! publicChannelMessage(authorizeText("abcdef"), user = user, addressedToUs = true)
 
         checkForMessages(Seq(broadcast(s"<@123>: authorize is not allowed in public channels, access code is now invalid")))
 
@@ -116,7 +124,7 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         blockingBrain.store(s"accessCode.panda", "abcdef")
 
         val user = mockUser("123", "panda")
-        sut ! groupChannelMessage(s"authorize me with code abcdef", user = user, addressedToUs = true)
+        sut ! groupChannelMessage(authorizeText("abcdef"), user = user, addressedToUs = true)
 
         checkForMessages(Seq(broadcast(s"<@123>: authorize is not allowed in public channels, access code is now invalid")))
 
@@ -126,7 +134,7 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         blockingBrain.store(s"accessCode.panda", "treqw")
 
         val user = mockUser("123", "panda")
-        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+        sut ! instantMessage(authorizeText("abcdef"), user = user)
 
         checkForMessages(Seq(broadcast(s"access code is invalid")))
 
@@ -134,15 +142,25 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
       }
       "not add the user if no access code has been defined" in {
         val user = mockUser("123", "panda")
-        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+        sut ! instantMessage(authorizeText("abcdef"), user = user)
 
         checkForMessages(Seq(broadcast(s"no access code for you, you can add one by executing `shellBot getCode`")))
+      }
+      "not add the user if the wrong shell" in {
+        blockingBrain.store(s"accessCode.panda", "abcdef")
+
+        val user = mockUser("123", "panda")
+        sut ! instantMessage(authorizeText("abcdef", "dsh"), user = user)
+
+        checkForMessages(Seq(broadcast(s"wrong shell dude")))
+
+        blockingBrain.retrieve(s"accessCode.panda") should be(Some("abcdef"))
       }
       "add the user if the access code matches" in {
         blockingBrain.store(s"accessCode.panda", "abcdef")
 
         val user = mockUser("123", "panda")
-        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+        sut ! instantMessage(authorizeText("abcdef"), user = user)
 
         checkForMessages(Seq(broadcast(s"authorized, you can run commands on `test`")))
 
@@ -177,5 +195,18 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
   private def broadcast(message: String): MessageAndThread = {
     MessageAndThread(message, None)
   }
+
+  private def commandText(command: String, shell: String = "test"): String = {
+    s"execute `$command` in `$shell`"
+  }
+
+  private def multiCommandText(commands: Seq[String], shell: String = "test"): String = {
+    s"multi ```${commands.mkString("\n")}``` in `$shell`"
+  }
+
+  private def authorizeText(code: String, shell: String = "test") = {
+    s"Authorize me in `$shell` with code $code"
+  }
+
   case class MessageAndThread(message: String, thread: Option[String] = None)
 }
