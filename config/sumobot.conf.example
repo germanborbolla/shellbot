@@ -12,6 +12,7 @@ plugins {
     enabled = true
     class = "com.sumologic.shellbot.ShellBotPlugin"
     name = "example"
+    users = []
   }
 
   help {

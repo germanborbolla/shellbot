@@ -31,21 +31,21 @@ class ThreadReaderTest extends BotPluginTestKit(ActorSystem("threadReader"))  {
     "ignore messages that are not in thread" in {
       val reader = system.actorOf(ThreadReader.props(user, threadId))
 
-      reader ! channelMessage("some text", user = user)
+      reader ! groupChannelMessage("some text", user = user)
 
       expectNoMsg()
     }
     "ignore messages in the thread that are not sent by the creating user" in {
       val reader = system.actorOf(ThreadReader.props(user, threadId))
 
-      reader ! channelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
+      reader ! groupChannelMessage("some text", user = mockUser("432", "panda"), threadId = Some(threadId))
 
       expectNoMsg()
     }
     "write the message to the output stream" in {
       val reader = system.actorOf(ThreadReader.props(user, threadId))
 
-      reader ! channelMessage("some text", user = user, threadId = Some(threadId))
+      reader ! groupChannelMessage("some text", user = user, threadId = Some(threadId))
 
       expectMsg(Input("some text"))
     }

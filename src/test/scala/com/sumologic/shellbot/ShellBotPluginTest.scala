@@ -18,10 +18,11 @@
  */
 package com.sumologic.shellbot
 
-import akka.actor.{ActorIdentity, ActorSystem}
+import akka.actor.{ActorIdentity, ActorSystem, Props}
 import akka.testkit.{TestKit, TestProbe}
 import com.sumologic.shellbase.actor.RunCommandActor
 import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, Output}
+import com.sumologic.sumobot.brain.{BlockingBrain, InMemoryBrain}
 import com.sumologic.sumobot.core.model.OutgoingMessage
 import com.sumologic.sumobot.plugins.BotPlugin.InitializePlugin
 import com.sumologic.sumobot.test.BotPluginTestKit
@@ -36,7 +37,9 @@ import scala.concurrent.duration._
 
 class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", ConfigFactory.parseResourcesAnySyntax("application.conf").resolve())) with BeforeAndAfterAll with BeforeAndAfterEach with MockitoSugar {
 
-  val runCommandProbe = TestProbe(RunCommandActor.Name)
+  private val runCommandProbe = TestProbe(RunCommandActor.Name)
+  private val brain = system.actorOf(Props(classOf[InMemoryBrain]))
+  private val blockingBrain = new BlockingBrain(brain)
   private val sut = system.actorOf(ShellBotPlugin.props(), "shell")
 
   private val threadId = "1487799797539.0000"
@@ -48,6 +51,14 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         sut ! message
         checkForMessages(Seq(inThread("Executing: `echo hello world!` in `test`")))
         runCommandProbe.expectMsg(Command(message.copy(thread_ts = Some(threadId)), "echo hello world!"))
+        sut ! Done(message.copy(thread_ts = Some(threadId)))
+      }
+      "not execute if the user is not in the authorized user list" in {
+        val evilUser = mockUser("124", "evil")
+        val message = instantMessage("execute echo hello world!", user = evilUser, id = threadId)
+        sut ! message
+        outgoingMessageProbe.expectNoMsg()
+        runCommandProbe.expectNoMsg()
         sut ! Done(message.copy(thread_ts = Some(threadId)))
       }
     }
@@ -80,6 +91,63 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
         runCommandProbe.expectMsg(Commands(message.copy(thread_ts = Some(threadId)), Seq("echo hello", "multi", "ask")))
         sut ! Done(message.copy(thread_ts = Some(threadId)))
       }
+      "not execute if the user is not in the authorized user list" in {
+        val evilUser = mockUser("124", "evil")
+        val message = instantMessage( """execute ```echo hello
+                                        |multi
+                                        |ask```""".stripMargin, user = evilUser, id = threadId)
+        sut ! message
+        outgoingMessageProbe.expectNoMsg()
+        runCommandProbe.expectNoMsg()
+      }
+    }
+    "authorizing users" should {
+      "ignore authorize messages from public channels" in {
+        blockingBrain.store(s"accessCode.panda", "abcdef")
+
+        val user = mockUser("123", "panda")
+        sut ! publicChannelMessage(s"authorize me with code abcdef", user = user, addressedToUs = true)
+
+        checkForMessages(Seq(broadcast(s"<@123>: authorize is not allowed in public channels, access code is now invalid")))
+
+        blockingBrain.retrieve(s"accessCode.panda") should be(None)
+      }
+      "ignore authorize messages from group channels" in {
+        blockingBrain.store(s"accessCode.panda", "abcdef")
+
+        val user = mockUser("123", "panda")
+        sut ! groupChannelMessage(s"authorize me with code abcdef", user = user, addressedToUs = true)
+
+        checkForMessages(Seq(broadcast(s"<@123>: authorize is not allowed in public channels, access code is now invalid")))
+
+        blockingBrain.retrieve(s"accessCode.panda") should be(None)
+      }
+      "not add the user if the access code doesn't match" in {
+        blockingBrain.store(s"accessCode.panda", "treqw")
+
+        val user = mockUser("123", "panda")
+        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+
+        checkForMessages(Seq(broadcast(s"access code is invalid")))
+
+        blockingBrain.retrieve(s"accessCode.panda") should be(Some("treqw"))
+      }
+      "not add the user if no access code has been defined" in {
+        val user = mockUser("123", "panda")
+        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+
+        checkForMessages(Seq(broadcast(s"no access code for you, you can add one by executing `shellBot getCode`")))
+      }
+      "add the user if the access code matches" in {
+        blockingBrain.store(s"accessCode.panda", "abcdef")
+
+        val user = mockUser("123", "panda")
+        sut ! instantMessage(s"authorize me with code abcdef", user = user)
+
+        checkForMessages(Seq(broadcast(s"authorized, you can run commands on `test`")))
+
+        blockingBrain.retrieve(s"accessCode.panda") should be(None)
+      }
     }
   }
 
@@ -95,8 +163,11 @@ class ShellBotPluginTest extends BotPluginTestKit(ActorSystem("Shellbot", Config
   override protected def beforeEach(): Unit = {
     val state = mock[RtmState]
     when(state.team).thenReturn(Team("something", "team", "team", "", 2, false, null, "awesome"))
-    sut ! InitializePlugin(state, null, null)
+    when(state.users).thenReturn(Seq(mockUser("123", "jshmoe")))
+    sut ! InitializePlugin(state, brain, null)
     sut ! ActorIdentity("runCommand", Some(runCommandProbe.ref))
+
+    blockingBrain.listValues().foreach(x => blockingBrain.remove(x._1))
   }
 
   private def inThread(message: String, thread: String = threadId): MessageAndThread = {

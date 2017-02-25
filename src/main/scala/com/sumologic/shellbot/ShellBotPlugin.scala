@@ -21,10 +21,19 @@ package com.sumologic.shellbot
 import akka.actor.{ActorIdentity, ActorRef, Identify, PoisonPill, Props}
 import com.sumologic.shellbase.actor.RunCommandActor
 import com.sumologic.shellbase.actor.model.{Command, Commands, Completed, Done, Output}
-import com.sumologic.sumobot.core.model.{IncomingMessage, InstantMessageChannel}
+import com.sumologic.sumobot.brain.Brain.{Remove, Retrieve, ValueMissing, ValueRetrieved}
+import com.sumologic.sumobot.core.model.{GroupChannel, IncomingMessage, InstantMessageChannel, PublicChannel}
 import com.sumologic.sumobot.plugins.BotPlugin
+import akka.pattern.ask
 
-import scala.io.Source
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import akka.util.Timeout
+import slack.models.User
+
+import scala.collection.mutable.ListBuffer
+
+import scala.collection.JavaConverters._
 
 /**
   * Bot that listens to slack and executes commands.
@@ -36,15 +45,18 @@ object ShellBotPlugin {
 }
 class ShellBotPlugin extends BotPlugin {
   private val name = config.getString("name")
+  private val authorizedUsers = ListBuffer.empty[User]
 
   override protected def help =
     s"""Execute commands:
       |
       |execute - Run a single command on $name
+      |authorize - Authorize user to run commands, get the code by running `shellBot getCode` on the shell.
     """.stripMargin
 
   private val SingleExecute = matchText(s"execute (.*)")
   private val MultiExecute = matchText(s"execute ```(.*)```")
+  private val Authorize = matchText(s"authorize me with code (.*)")
 
   private var runCommandActor: ActorRef = _
 
@@ -53,20 +65,49 @@ class ShellBotPlugin extends BotPlugin {
     context.system.eventStream.subscribe(self, classOf[Output])
   }
 
+  override protected def initialize(): Unit = {
+    val whiteListedUsers = config.getStringList("users").asScala
+    authorizedUsers.appendAll(state.users.filter(u => whiteListedUsers.contains(u.name)))
+  }
+
   override protected def receiveIncomingMessage: ReceiveIncomingMessage = {
-    case message@IncomingMessage(MultiExecute(commands), true, _, _, parentId, None) =>
-      message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
-      val commandSeq = commands.split("\n")
-      val messageInThread = message.copy(thread_ts = Some(parentId))
-      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts), s"threadReader-${message.ts}")
-      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
-      runCommandActor ! Commands(messageInThread, commandSeq.toSeq)
-    case message@IncomingMessage(SingleExecute(command), true, _, _, parentId, None) =>
-      message.respond(s"Executing: `$command` in `$name`", Some(parentId))
-      val messageInThread = message.copy(thread_ts = Some(parentId))
-      runCommandActor ! Command(messageInThread, command)
-      val threadReader = context.actorOf(Props(classOf[ThreadReader], message.sentByUser, message.ts), s"threadReader-${message.ts}")
-      context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
+    case message@IncomingMessage(MultiExecute(commands), true, _, user, parentId, None) =>
+      onlyIfAuthorized(message) {
+        message.respond(s"Executing: ```$commands``` in `$name`", Some(parentId))
+        val commandSeq = commands.split("\n")
+        val messageInThread = message.copy(thread_ts = Some(parentId))
+        val threadReader = context.actorOf(Props(classOf[ThreadReader], user, parentId), s"threadReader-$parentId")
+        context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
+        runCommandActor ! Commands(messageInThread, commandSeq.toSeq)
+      }
+    case message@IncomingMessage(SingleExecute(command), true, _, user, parentId, None) =>
+      onlyIfAuthorized(message) {
+        message.respond(s"Executing: `$command` in `$name`", Some(parentId))
+        val messageInThread = message.copy(thread_ts = Some(parentId))
+        runCommandActor ! Command(messageInThread, command)
+        val threadReader = context.actorOf(Props(classOf[ThreadReader], user, parentId), s"threadReader-$parentId")
+        context.system.eventStream.subscribe(threadReader, classOf[IncomingMessage])
+      }
+    case message@IncomingMessage(Authorize(code), _, PublicChannel(_,_), user, _, _) =>
+      brain ! Remove(s"accessCode.${user.name}")
+      message.respond(s"authorize is not allowed in public channels, access code is now invalid")
+    case message@IncomingMessage(Authorize(code), _, GroupChannel(_,_), user, _, _) =>
+      brain ! Remove(s"accessCode.${user.name}")
+      message.respond(s"authorize is not allowed in public channels, access code is now invalid")
+    case message@IncomingMessage(Authorize(code), _, InstantMessageChannel(_,_), user, _, _) =>
+      implicit val timeout = Timeout(2.seconds)
+      Await.result(brain ? Retrieve(s"accessCode.${user.name}"), 2.seconds) match {
+        case ValueRetrieved(_, value) =>
+          if (value == code) {
+            authorizedUsers.append(user)
+            brain ! Remove(s"accessCode.${user.name}")
+            message.respond(s"authorized, you can run commands on `$name`")
+          } else {
+            message.respond("access code is invalid")
+          }
+        case ValueMissing(_) =>
+          message.respond(s"no access code for you, you can add one by executing `shellBot getCode`")
+      }
   }
 
   override protected def pluginReceive: Receive = {
@@ -84,6 +125,12 @@ class ShellBotPlugin extends BotPlugin {
       context.child(s"threadReader-${message.thread_ts.get}").foreach(_ ! PoisonPill)
     case Output(message, line) =>
       message.say(line, message.thread_ts)
+  }
+
+  private def onlyIfAuthorized(message: IncomingMessage)(f: => Unit) = {
+    if (authorizedUsers.contains(message.sentByUser)) {
+      f
+    }
   }
 
   private def urlForThread(message: IncomingMessage): String = {

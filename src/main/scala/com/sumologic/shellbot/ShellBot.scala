@@ -19,7 +19,7 @@
 package com.sumologic.shellbot
 
 import akka.actor.Props
-import com.sumologic.shellbase.ShellBase
+import com.sumologic.shellbase.{ShellBase, ShellCommand}
 import com.sumologic.shellbase.actor.RunCommandActor
 import com.sumologic.sumobot.brain.InMemoryBrain
 import com.sumologic.sumobot.core.Bootstrap
@@ -30,10 +30,16 @@ import org.apache.commons.cli.CommandLine
   * Mixin for adding ShellBot to any ShellBase.
   */
 trait ShellBot extends ShellBase { shellBase =>
+  private val brain = Bootstrap.system.actorOf(Props(classOf[InMemoryBrain]))
+
+  override def commands: Seq[ShellCommand] = {
+    Seq(new ShellBotCommandSet(brain))
+  }
+
   override def init(cmdLine: CommandLine): Boolean = {
     if (super.init(cmdLine)) {
-      Bootstrap.system.actorOf(RunCommandActor.props(name, commands), RunCommandActor.Name)
-      Bootstrap.bootstrap(Props(classOf[InMemoryBrain]), PluginsFromConfig)
+      Bootstrap.system.actorOf(RunCommandActor.props(name, commands.filterNot(_.name == "shellbot")), RunCommandActor.Name)
+      Bootstrap.bootstrap(brain, PluginsFromConfig)
       true
     } else {
       false

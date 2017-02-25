@@ -25,7 +25,7 @@ import org.apache.commons.cli.CommandLine
 
 object ExampleShell extends ShellBase("example") with ShellBot {
   override def commands: Seq[ShellCommand] = {
-    Seq(
+    super.commands ++ Seq(
       new RNGCommandSet,
       new ShellCommand("ask", "gets your name for nefarious purposes") {
         override def execute(cmdLine: CommandLine) = {
